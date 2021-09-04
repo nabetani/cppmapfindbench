@@ -8,9 +8,21 @@
 #include <iostream>
 #include <sstream>
 #include <random>
+#include <unordered_map>
 
 using key_type = std::pair<void *, uint64_t>;
 using value_t = size_t;
+
+
+struct hasher_t {
+    typedef std::size_t result_type;
+    std::size_t operator()( key_type const & key) const noexcept
+    {
+        return (intptr_t)key.first ^ (intptr_t)key.second;
+    }
+};
+
+using uomap_t = std::unordered_map<key_type, value_t, hasher_t>;
 
 key_type key_at(size_t ix)
 {
@@ -36,6 +48,16 @@ void insert(std::map<key_type, value_t> &c, size_t ix, size_t v)
 
 std::map<key_type, value_t>::const_iterator //
 find (std::map<key_type, value_t> const &c, key_type const & k ){
+    return c.find(k);
+}
+
+void insert(uomap_t &c, size_t ix, size_t v)
+{
+    c[key_at(ix)] = v;
+}
+
+uomap_t::const_iterator //
+find (uomap_t const &c, key_type const & k ){
     return c.find(k);
 }
 
@@ -104,12 +126,14 @@ int main(int argc, char const *argv[])
 
     runner<std::vector<std::pair<key_type, value_t>>, key_type, value_t> mvec(csize, ecount, "vector");
     runner<std::map<key_type, value_t>, key_type, value_t> mmap(csize, ecount, "map");
+    runner<uomap_t, key_type, value_t> muomap(csize, ecount, "uomap");
 
     uint64_t s=0;
     for (int i = 0; i < 2; ++i)
     {
         s += mvec.run(0<i);
         s += mmap.run(0<i);
+        s += muomap.run(0<i);
     }
     std::cout << s << std::endl;
     return 0;
