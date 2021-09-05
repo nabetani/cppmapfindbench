@@ -11,39 +11,27 @@
 #include <array>
 #include <unordered_map>
 
-using pad_type = std::array<uint32_t, PAD_SIZE>;
+#if !defined KEY_SIZE
+#define KEY_SIZE 1
+#endif
 
-pad_type create_pad(size_t ix)
-{
-    pad_type r = {};
-    r[0] = ix;
-    return r;
-}
-
-using key_type = std::pair<pad_type, uint64_t volatile>;
+using key_type = std::array<uint32_t, KEY_SIZE>;
 using value_t = size_t;
 
 struct hasher_t
 {
     typedef std::size_t result_type;
 
-    std::size_t operator()(pad_type const &p) const noexcept
+    std::size_t operator()(key_type const &key) const noexcept
     {
         size_t r = 0;
-        for (auto e : p)
+        for (auto e : key)
         {
-            r ^= e;
-            r += r / 2;
+            r += r / 2 + r * 2 + e;
         }
         return r;
     }
-    std::size_t operator()(key_type const &key) const noexcept
-    {
-        return (*this)(key.first) ^ (intptr_t)key.second;
-    }
 };
-
-using uomap_t = std::unordered_map<key_type, value_t, hasher_t>;
 
 template <typename key_t, typename mapped_t>
 struct linemap
@@ -88,19 +76,28 @@ struct linemap
 };
 
 using linemap_t = linemap<key_type, value_t>;
+using uomap_t = std::unordered_map<key_type, value_t, hasher_t>;
+using map_t = std::unordered_map<key_type, value_t, hasher_t>;
 
 key_type key_at(size_t ix)
 {
-    return {create_pad(ix), ix};
+    key_type k = {};
+    *k.rbegin() = ix & ~0u;
+    *(k.rbegin() + 1) = (ix >> 32) & ~0u;
+    return k;
 }
 
 template <typename con_t, typename k_t, typename v_t>
 struct runner
 {
-    std::vector<con_t> cons_;
-    size_t ecount_;
+    int trial_count_ = 100;
+    const size_t ecount_;
     std::string name_;
     std::mt19937 rng_{0};
+    static constexpr size_t KEY_COUNT = 16;
+    static constexpr size_t CON_COUNT = 16;
+    std::array<k_t, KEY_COUNT> keys_;
+    std::array<con_t, CON_COUNT> cons_;
 
     con_t create_con(size_t i)
     {
@@ -122,7 +119,7 @@ struct runner
     }
 
     runner(size_t csize, size_t ecount, char const *name)
-        : cons_(csize),
+        : trial_count_(csize),
           ecount_(ecount),
           name_(name)
     {
@@ -130,32 +127,30 @@ struct runner
         {
             cons_[i] = create_con(i);
         }
+        for (size_t i = 0; i < keys_.size(); ++i)
+        {
+            keys_[i] = key_at(i);
+        }
     }
 
     std::pair<uint64_t, double> run()
     {
         uint64_t sum = 0;
         using clock = std::chrono::high_resolution_clock;
+        std::uniform_int_distribution<size_t> key_dist(0, keys_.size() - 1);
+        std::uniform_int_distribution<size_t> con_dist(0, cons_.size() - 1);
+
         auto start = clock::now();
-        size_t kix = 0;
-        for (auto const &c : cons_)
+        for (int i = 0; i < trial_count_; ++i)
         {
-            // std::cout << "[" << c.size() << "]";
-            auto k = key_at(kix);
-            kix = (kix + 1) % (ecount_ + 1);
-            auto it = c.find(k);
-            if (it != c.end())
+            auto const &key = keys_[key_dist(rng_)];
+            auto const &con = cons_[con_dist(rng_)];
+            auto it = con.find(key);
+            if (it != con.end())
             {
-                // std::cout << it->second << " ";
                 sum += it->second;
             }
-            else
-            {
-                // std::cout << " - ";
-            }
-            // int ix = 0;
         }
-        // std::endl(std::cout);
         auto diff = clock::now() - start;
         double sec = std::chrono::duration_cast<std::chrono::nanoseconds>(diff).count() * 1e-9;
         return {sum, sec};
