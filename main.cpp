@@ -8,17 +8,38 @@
 #include <iostream>
 #include <sstream>
 #include <random>
+#include <array>
 #include <unordered_map>
 
-using key_type = std::pair<void *volatile, uint64_t volatile>;
+using pad_type = std::array<uint32_t, PAD_SIZE>;
+
+pad_type create_pad(size_t ix)
+{
+    pad_type r = {};
+    r[0] = ix;
+    return r;
+}
+
+using key_type = std::pair<pad_type, uint64_t volatile>;
 using value_t = size_t;
 
 struct hasher_t
 {
     typedef std::size_t result_type;
+
+    std::size_t operator()(pad_type const &p) const noexcept
+    {
+        size_t r = 0;
+        for (auto e : p)
+        {
+            r ^= e;
+            r += r / 2;
+        }
+        return r;
+    }
     std::size_t operator()(key_type const &key) const noexcept
     {
-        return (intptr_t)key.first ^ (intptr_t)key.second;
+        return (*this)(key.first) ^ (intptr_t)key.second;
     }
 };
 
@@ -70,14 +91,7 @@ using linemap_t = linemap<key_type, value_t>;
 
 key_type key_at(size_t ix)
 {
-    return {(void *)(32 + ix * 32), ix};
-}
-
-std::string str(std::pair<key_type, value_t> const &v)
-{
-    std::stringstream ss;
-    ss << (intptr_t)v.first.first << " " << v.first.second;
-    return ss.str();
+    return {create_pad(ix), ix};
 }
 
 template <typename con_t, typename k_t, typename v_t>
@@ -118,13 +132,13 @@ struct runner
         }
     }
 
-    uint64_t run(bool measure)
+    std::pair<uint64_t, double> run()
     {
         uint64_t sum = 0;
         using clock = std::chrono::high_resolution_clock;
         auto start = clock::now();
         size_t kix = 0;
-        for (auto const & c : cons_)
+        for (auto const &c : cons_)
         {
             // std::cout << "[" << c.size() << "]";
             auto k = key_at(kix);
@@ -143,11 +157,8 @@ struct runner
         }
         // std::endl(std::cout);
         auto diff = clock::now() - start;
-        if (measure)
-        {
-            std::cout << name_ << ": t=" << std::chrono::duration_cast<std::chrono::microseconds>(diff).count() * 1e-3 << std::endl;
-        }
-        return sum;
+        double sec = std::chrono::duration_cast<std::chrono::nanoseconds>(diff).count() * 1e-9;
+        return {sum, sec};
     }
 };
 
@@ -156,44 +167,42 @@ int main(int argc, char const *argv[])
     size_t csize = argc < 2 ? 100 : std::atoi(argv[1]);
     size_t ecount = argc < 3 ? 10 : std::atoi(argv[2]);
 
-    std::printf("csize=%zu ecount=%zu\n", csize, ecount);
+    std::vector<int64_t> sums;
 
     // runner<std::vector<std::pair<key_type, value_t>>, key_type, value_t> mvec(csize, ecount, "vector");
     runner<std::map<key_type, value_t>, key_type, value_t> mmap(csize, ecount, "map");
     runner<uomap_t, key_type, value_t> muomap(csize, ecount, "uomap");
     runner<linemap_t, key_type, value_t> mlinemap(csize, ecount, "linemap");
-
-    linemap<int, int> m;
-    for (int i = 0; i < 256; ++i)
-    {
-        m[i ^ 0xaa] = i;
-    }
-    for (int i = 0; i < 256; ++i)
-    {
-        auto it = m.find(i);
-        if (it == m.end())
-        {
-            printf("failed to find %d\n", i);
-            throw "1";
-        }
-        if (it->second != (i ^ 0xaa))
-        {
-            printf("it->second is %x, not %x\n", it->second, i ^ 0xaa);
-            throw "2";
-        }
-    }
-
-    std::vector<uint64_t> s;
+    std::vector<double> ticks;
     for (int i = 0; i < 3; ++i)
     {
-        s.push_back(mmap.run(0 < i));
-        s.push_back(muomap.run(0 < i));
-        s.push_back(mlinemap.run(0 < i));
+        ticks.clear();
+        {
+            auto [s, t] = mmap.run();
+            ticks.push_back(t);
+            sums.push_back(s);
+        }
+        {
+            auto [s, t] = muomap.run();
+            ticks.push_back(t);
+            sums.push_back(s);
+        }
+        {
+            auto [s, t] = mlinemap.run();
+            ticks.push_back(t);
+            sums.push_back(s);
+        }
     }
-    for (auto e : s)
+    std::cout << csize << "," << ecount;
+    for (auto t : ticks)
     {
-        std::cout << e << " ";
+        std::cout << "," << t;
     }
     std::cout << std::endl;
+    for (auto e : sums)
+    {
+        std::cerr << e << " ";
+    }
+    std::cerr << std::endl;
     return 0;
 }
