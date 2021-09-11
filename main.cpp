@@ -10,6 +10,7 @@
 #include <random>
 #include <array>
 #include <unordered_map>
+#include <boost/container/flat_map.hpp>
 
 #if !defined KEY_SIZE
 #define KEY_SIZE 1
@@ -77,7 +78,8 @@ struct linemap
 
 using linemap_t = linemap<key_type, value_t>;
 using uomap_t = std::unordered_map<key_type, value_t, hasher_t>;
-using map_t = std::unordered_map<key_type, value_t, hasher_t>;
+using map_t = std::unordered_map<key_type, value_t>;
+using bfmap_t = boost::container::flat_map<key_type, value_t>;
 
 key_type key_at(size_t ix)
 {
@@ -168,6 +170,7 @@ int main(int argc, char const *argv[])
     runner<std::map<key_type, value_t>, key_type, value_t> mmap(csize, ecount, "map");
     runner<uomap_t, key_type, value_t> muomap(csize, ecount, "uomap");
     runner<linemap_t, key_type, value_t> mlinemap(csize, ecount, "linemap");
+    runner<bfmap_t,key_type, value_t> mbfmap(csize, ecount, "bfmap");
     std::vector<double> ticks;
     for (int i = 0; i < 3; ++i)
     {
@@ -184,6 +187,11 @@ int main(int argc, char const *argv[])
         }
         {
             auto [s, t] = mlinemap.run();
+            ticks.push_back(t);
+            sums.push_back(s);
+        }
+        {
+            auto [s, t] = mbfmap.run();
             ticks.push_back(t);
             sums.push_back(s);
         }
